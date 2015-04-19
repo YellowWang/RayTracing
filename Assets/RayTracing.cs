@@ -7,12 +7,15 @@ public class RayTracing {
 
 	public static int width = 100;
 	public static int height = 100;
-	public static List<Sphere> renderlist = new List<Sphere>();
+	public const  int recursive_num = 5;
+
+	public static List<Renderable> renderlist = new List<Renderable>();
 
 	public static Color black = new Color(0,0,0);
 	public static Color white = new Color (1,1,1);
 	public static Color red   = new Color(1,0,0);
 	public static Color green = new Color(0,1,0);     
+	public static Color blue = new Color (0,0,1);
 
 	public class Ray
 	{
@@ -31,14 +34,54 @@ public class RayTracing {
 		}
 	}
 
-	public class Sphere
+	#region renderable
+	public class Renderable
+	{
+		public virtual InterResult Intersect(Ray ray){
+			return null;
+		}
+		public Material material;		
+	}
+
+	public class Plane : Renderable
+	{
+		public Vector3 n;
+		public float   d;
+		private Vector3 pos;
+
+		public Plane(Vector3 n, float d, Material m)
+		{
+			this.n = n.normalized;
+			this.d = d;
+			this.material = m;
+
+			this.pos = this.n * this.d;
+		}
+
+		public override InterResult Intersect(Ray ray)
+		{
+			var ddotn = Vector3.Dot (ray.dir, n);
+			if (ddotn >= 0)
+				return null;
+
+			var dot = Vector3.Dot(this.n, (this.pos-ray.pos));
+			InterResult result = new InterResult ();
+			result.renderable = this;
+			result.distance = - dot / ddotn;
+			result.pos = ray.GetPoint (result.distance);
+			result.normal = this.n;
+			result.inRay = ray.dir;
+			return result;
+		}
+	}
+
+	public class Sphere : Renderable
 	{
 		public Vector3  pos;
-		public float	radius;
-		public Material.Type material;
+		public float	radius;		
 		public float 	albedo; // 0-1
 		public Color  color;
-		public Sphere(Vector3 p, float r, Material.Type m, float albedo = 0f, Color color = default(Color))
+		public Sphere(Vector3 p, float r, Material m)
 		{
 			pos = p;
 			radius = r;
@@ -46,7 +89,32 @@ public class RayTracing {
 			this.albedo = albedo;
 			this.color = color;
 		}
+
+		public override InterResult Intersect(Ray ray)
+		{
+			// early check
+			Vector3 v = this.pos - ray.pos;		
+			float ddotv = Vector3.Dot (ray.dir, v);
+			if (ddotv >= 0) {
+				float param1 = ddotv * ddotv;
+				float param2 = v.magnitude * v.magnitude - this.radius * this.radius;
+				if (param1 - param2 >= 0) {
+					float distance = ddotv - Mathf.Sqrt (param1 - param2);
+
+					InterResult result = new InterResult ();
+					result.pos = ray.GetPoint (distance);
+					result.normal = (result.pos - this.pos).normalized;
+					result.inRay = ray.dir;
+					result.renderable = this;
+					result.distance = (ray.pos - result.pos).magnitude;
+					return result;
+				}
+			}
+
+			return null;
+		}
 	}		
+	#endregion
 
 	#region intersect
 	public class InterResult
@@ -54,31 +122,9 @@ public class RayTracing {
 		public Vector3 pos;
 		public Vector3 normal;
 		public Vector3 inRay;
-		public Sphere sphere;
-	}
-
-	public static InterResult Intersect(Ray ray, Sphere sphere)
-	{
-		// early check
-		Vector3 v = sphere.pos - ray.pos;		
-		float ddotv = Vector3.Dot (ray.dir, v);
-		if (ddotv >= 0) {
-			float param1 = ddotv * ddotv;
-			float param2 = v.magnitude * v.magnitude - sphere.radius * sphere.radius;
-			if (param1 - param2 >= 0) {
-				float distance = ddotv - Mathf.Sqrt (param1 - param2);
-
-				InterResult result = new InterResult ();
-				result.pos = ray.GetPoint (distance);
-				result.normal = (result.pos - sphere.pos).normalized;
-				result.inRay = ray.dir;
-				result.sphere = sphere;
-				return result;
-			}
-		}
-			
-		return null;
-	}
+		public float distance;
+		public Renderable renderable;
+	}		
 
 	#endregion
 
@@ -90,15 +136,23 @@ public class RayTracing {
 			Phong,
 			reflectance,
 		}
-
-
+			
+		public Type type;
+		public float albedo;
+		public Color color;
+		public Material(Type t, float a, Color c)
+		{
+			this.type = t;
+			this.albedo = a;
+			this.color = c;
+		}
 
 		static public Color GetColor(InterResult result, Camera camera)
 		{
-			if (result.sphere.material == Type.Phong)
+			if (result.renderable.material.type == Type.Phong)
 				return GetColorByPhong (result, camera);
-			else if (result.sphere.material == Type.reflectance)
-				return GetColorByReflectance (result, camera, 10);
+			else if (result.renderable.material.type == Type.reflectance)
+				return GetColorByReflectance (result, camera, recursive_num);
 			return black;
 		}
 
@@ -106,32 +160,42 @@ public class RayTracing {
 		{
 			float diffuse = Mathf.Max(0,  Vector3.Dot (result.normal, -result.inRay)) * 0.8f;
 			Vector3 L = (camera.pos - result.pos).normalized;
-			float specular = Mathf.Pow (Mathf.Max (0, Vector3.Dot (Vector3.Reflect (result.inRay, result.normal), L)), 10f) * 1.0f;
-			float final = diffuse + specular;
+			float specular = Mathf.Pow (Mathf.Max (0, Vector3.Dot (Vector3.Reflect (result.inRay, result.normal), L)), 10f) * 1.0f;			
+			var final = (diffuse * result.renderable.material.color) + specular*RayTracing.white;
 
-			return new Color(final, final, final, 1.0f);
+			return final;
 		}
 
-		static private Color GetColorByReflectance(InterResult result, Camera camera, int depth = 10)
+		static private Color GetColorByReflectance(InterResult result, Camera camera, int depth)
 		{						
-			float diffuse = Mathf.Max(0,  Vector3.Dot (result.normal, -result.inRay)) * (1-result.sphere.albedo);
-			var final = diffuse * result.sphere.color;								
-
-			if (depth == 0 || result.sphere.albedo - 0f < 0.000001f)
+			float diffuse = Mathf.Max(0,  Vector3.Dot (result.normal, -result.inRay)) * (1-result.renderable.material.albedo);
+			var final = diffuse * result.renderable.material.color;											
+			if (depth == 0 || result.renderable.material.albedo - 0f < 0.000001f)
 				return final;
 
 			// reflect			
 			Ray newRay = new Ray(result.pos, Vector3.Reflect(result.inRay, result.normal));		
+			InterResult nearest=null;
+			float min_distance=0f;
 			for (int i = 0; i < RayTracing.renderlist.Count; i++) {
-				if (RayTracing.renderlist [i] == result.sphere)
+				//todo: if ignore myself
+				if (RayTracing.renderlist [i] == result.renderable)
 					continue;
-				var newInterResult = RayTracing.Intersect (newRay, RayTracing.renderlist[i]);
+				var newInterResult = RayTracing.renderlist [i].Intersect (newRay);
 				if (newInterResult != null) {
-					var reflect = GetColorByReflectance (newInterResult, camera, depth-1) * result.sphere.albedo;
-					final += reflect;
-					Debug.Log ("reflect:"+reflect.ToString()+ "/ albedo:"+newInterResult.sphere.albedo + "/final:"+final.ToString());
-					break;
-				}
+					if (nearest == null) {
+						nearest = newInterResult;
+						min_distance = newInterResult.distance;
+					} else if (newInterResult.distance < min_distance){
+						nearest = newInterResult;
+						min_distance = newInterResult.distance;
+					}
+				}				
+			}
+
+			if (nearest != null) {
+				var reflect = GetColorByReflectance (nearest, camera, depth-1) * result.renderable.material.albedo;
+				final += reflect;				
 			}
 
 			return final;
@@ -197,17 +261,18 @@ public class RayTracing {
 		Texture2D tex = new Texture2D (RayTracing.width, RayTracing.height);
 		var color = new Color (0.0f, 0.0f, 0.0f, 1.0f);
 
-		Sphere sphere1 = new Sphere (new Vector3(0,0,10), 3,  Material.Type.Phong);
+		Material m1 = new Material (Material.Type.Phong, 0f, color);
+		Sphere sphere1 = new Sphere (new Vector3(0,0,10), 3,  m1);
 		var camera = new Camera ();
 
 		int count = 0;
 		for (int i = 0; i < RayTracing.width; i++) {
 			for (int k = 0; k < RayTracing.height; k++) {
 				var ray = camera.ScreenToRay (i, k);				
-				var result = Intersect (ray, sphere1);
+				var result = sphere1.Intersect (ray);
 				if (result != null) {
-					color.r = color.g = color.b = (result.sphere.pos.z-result.pos.z)/result.sphere.radius;					
-					//Debug.Log (count + ":" + ray.dir.ToString() + "/" + result.pos.z);
+					//color.r = color.g = color.b = (result.renderable.pos.z-result.pos.z)/result.renderable.radius;										
+					color.r = color.g = color.b = 1.0f;
 				} else {
 					color.r = color.g = color.b = 0.0f;
 				}
@@ -223,14 +288,15 @@ public class RayTracing {
 		Texture2D tex = new Texture2D (RayTracing.width, RayTracing.height);
 		var color = new Color (0.0f, 0.0f, 0.0f, 1.0f);
 
-		Sphere sphere1 = new Sphere (new Vector3(0,0,10), 3, Material.Type.Phong);
+		Material m1 = new Material (Material.Type.Phong, 0f, color);
+		Sphere sphere1 = new Sphere (new Vector3(0,0,10), 3, m1);
 		var camera = new Camera ();
 
 		int count = 0;
 		for (int i = 0; i < RayTracing.width; i++) {
 			for (int k = 0; k < RayTracing.height; k++) {
 				var ray = camera.ScreenToRay (i, k);				
-				var result = Intersect (ray, sphere1);
+				var result = sphere1.Intersect (ray);
 				if (result != null) {
 					color.r = result.normal.x;
 					color.g = result.normal.y;
@@ -250,14 +316,15 @@ public class RayTracing {
 		Texture2D tex = new Texture2D (RayTracing.width, RayTracing.height);
 		var color = new Color (0.0f, 0.0f, 0.0f, 1.0f);
 
-		Sphere sphere1 = new Sphere (new Vector3(0,0,10), 3, Material.Type.Phong);
+		Material m1 = new Material (Material.Type.Phong, 0f, color);
+		Sphere sphere1 = new Sphere (new Vector3(0,0,10), 3, m1);
 		var camera = new Camera ();
 
 		int count = 0;
 		for (int i = 0; i < RayTracing.width; i++) {
 			for (int k = 0; k < RayTracing.height; k++) {
 				var ray = camera.ScreenToRay (i, k);				
-				var result = Intersect (ray, sphere1);
+				var result = sphere1.Intersect (ray);
 				if (result != null) {
 					color = Material.GetColor (result, camera);
 				} else {
@@ -275,10 +342,15 @@ public class RayTracing {
 		Texture2D tex = new Texture2D (RayTracing.width, RayTracing.height);
 		var color = new Color (0.0f, 0.0f, 0.0f, 1.0f);
 
-		Sphere sphere1 = new Sphere (new Vector3(3.5f,0,10), 2f, Material.Type.reflectance, 0.5f, RayTracing.red);
-		Sphere sphere2 = new Sphere (new Vector3(-3.5f,0,8), 2.5f, Material.Type.reflectance, 0.0f, RayTracing.green);
+		Material m1 = new Material (Material.Type.reflectance, 0.5f, RayTracing.red);		
+		Sphere sphere1 = new Sphere (new Vector3(2f,0,5), 2f, m1);
+		Material m2 = new Material (Material.Type.reflectance, 0.5f, RayTracing.green);
+		Sphere sphere2 = new Sphere (new Vector3(-2f,0,5), 2f, m2);
+		Material m3 = new Material (Material.Type.reflectance, 0f, RayTracing.blue);
+		Plane plane1 = new Plane (new Vector3 (0f, -1f, 0f), 10f, m3);
 		renderlist.Add (sphere1);
 		renderlist.Add (sphere2);
+		renderlist.Add (plane1);
 
 		var camera = new Camera ();
 
@@ -288,7 +360,7 @@ public class RayTracing {
 				var ray = camera.ScreenToRay (i, k);	
 				color.r = color.g = color.b = 0.0f;								
 				foreach (var renderable in renderlist) {
-					var result = Intersect (ray, renderable);
+					var result = renderable.Intersect (ray);
 					if (result != null) {
 						color = Material.GetColor (result, camera);						
 						break;
