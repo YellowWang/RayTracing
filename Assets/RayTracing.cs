@@ -5,10 +5,10 @@ using System.IO;
 
 public class RayTracing {
 
-	public static int width = 100;
-	public static int height = 100;
+	public static int width = 512;
+	public static int height = 512;
 	public const  int recursive_num = 10;
-	public static Vector3 lightPos = new Vector3 (0, 0, 0);
+	public static Vector3 lightPos = new Vector3 (10, 20, 0);
 
 	public static List<Renderable> renderlist = new List<Renderable>();
 
@@ -136,7 +136,7 @@ public class RayTracing {
 	{
 		public enum Type
 		{
-			diffuse,
+			checkboard,
 			phong,
 			reflectance,
 		}
@@ -158,16 +158,17 @@ public class RayTracing {
 
 		static public Color GetColorByType(InterResult result, Camera camera)
 		{
-			if (result.renderable.material.type == Type.diffuse)
-				return GetColorByDiffuse (result, camera);
+			if (result.renderable.material.type == Type.checkboard)
+				return GetColorByCheckboard (result, camera);
 			else if (result.renderable.material.type == Type.phong)
 				return GetColorByPhong (result, camera);			
 			return black;
 		}
 
-		static private Color GetColorByDiffuse (InterResult result, Camera camera)
+		static private Color GetColorByCheckboard (InterResult result, Camera camera)
 		{
-			return result.renderable.material.color;
+			//return result.renderable.material.color;
+			return ((Mathf.Floor(result.pos.x) + Mathf.Floor(result.pos.z)) % 2) < 1 ? RayTracing.white : RayTracing.black;
 		}
 
 		static private Color GetColorByPhong (InterResult result, Camera camera)
@@ -176,7 +177,7 @@ public class RayTracing {
 			float diffuse = Mathf.Max(0,  Vector3.Dot (result.normal, inray));
 			Vector3 L = (camera.pos - result.pos).normalized;
 			float specular = Mathf.Pow (Mathf.Max (0, Vector3.Dot (-Vector3.Reflect (inray, result.normal), L)), 10f) * 1.0f;			
-			var final = (diffuse * result.renderable.material.color);// + specular*RayTracing.white;			
+			var final = (diffuse * result.renderable.material.color) + specular*RayTracing.white;			
 			return final;
 		}
 
@@ -187,7 +188,7 @@ public class RayTracing {
 			var final = diffuse * result.renderable.material.color;											
 			if (depth == 0 || result.renderable.material.albedo - 0f < 0.000001f)
 				return final;*/
-			Color final = GetColorByType (result, camera);
+			Color final = GetColorByType (result, camera)*(1-result.renderable.material.albedo);
 			if (depth == 0 || result.renderable.material.albedo - 0f < 0.000001f)
 				return final;
 			
@@ -375,11 +376,11 @@ public class RayTracing {
 		Texture2D tex = new Texture2D (RayTracing.width, RayTracing.height);
 		var color = new Color (0.0f, 0.0f, 0.0f, 1.0f);
 
-		Material m1 = new Material (Material.Type.phong, 0.5f, RayTracing.red);		
+		Material m1 = new Material (Material.Type.phong, 0.3f, RayTracing.red);		
 		Sphere sphere1 = new Sphere (new Vector3(2f,1f,10), 2f, m1);
-		Material m2 = new Material (Material.Type.phong, 0.5f, RayTracing.green);
+		Material m2 = new Material (Material.Type.phong, 0.3f, RayTracing.green);
 		Sphere sphere2 = new Sphere (new Vector3(-2f,1f,10), 2f, m2);
-		Material m3 = new Material (Material.Type.diffuse, 0.5f, new Color(0.0f, 0.5f, 0.5f));
+		Material m3 = new Material (Material.Type.checkboard, 0.5f, new Color(0.0f, 0.5f, 0.5f));
 		Plane plane1 = new Plane (new Vector3 (0f, 1f, 0f), -1.0f, m3);
 		renderlist.Add (sphere1);
 		renderlist.Add (sphere2);
@@ -429,7 +430,7 @@ public class RayTracing {
 			}
 		}
 		File.WriteAllBytes(Application.persistentDataPath + "/115.png", tex.EncodeToPNG ());
-		Debug.Log ("path:" + Application.persistentDataPath);
+		//Debug.Log ("path:" + Application.persistentDataPath);
 	}
 	#endregion
 
@@ -440,25 +441,7 @@ public class RayTracing {
 		//TestNormal();
 		//TestPhong();
 
-		// reflect test
-		/*Vector3 n = new Vector3 (0, 1, 0);
-		Vector3 inray = new Vector3 (1, 1, 0).normalized;
-		Vector3 reflect = Vector3.Reflect (inray, n);
-		Debug.Log ("reflect:" + reflect.ToString ());*/
-
 		TestReflect();
-
-		// intersect test
-		/*Material m3 = new Material (Material.Type.diffuse, 0f, RayTracing.white);
-		Plane plane1 = new Plane (new Vector3 (0f, 1f, 0f), 0.0f, m3);		
-		Ray r = new Ray (new Vector3 (0, 0, 0), new Vector3 (0, -1, 0));
-		var result = plane1.Intersect (r);
-		Debug.Log ("result:" + (result != null));
-		Sphere sphere = new Sphere (new Vector3 (0, 0, 0), 1, m3);
-		Ray r2 = new Ray (new Vector3 (0, 0, 1), new Vector3 (0, 0, 1));
-		result = sphere.Intersect (r2);
-		Debug.Log ("result:" + (result != null));*/
-
 	}
 
 
