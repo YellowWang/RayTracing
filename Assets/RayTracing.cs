@@ -7,7 +7,7 @@ public class RayTracing {
 
 	public static int width = 512;
 	public static int height = 512;
-	public const  int recursive_num = 10;
+	public const  int recursive_num = 1;
 
 	public static List<Renderable> renderlist = new List<Renderable>();
 
@@ -36,10 +36,10 @@ public class RayTracing {
 	}
 
 	#region lighting	
-	public static string  lightType = "dir"; // directional light
+	public static string  lightType = "point"; // “dir":directional light, "point":point light
 	public static Vector3 lightPos  = new Vector3 (10, 20, 0);
 	public static Vector3 lightDir  = new Vector3 (-1.75f, -2f, 1.5f).normalized;	
-	public static Vector3 irradiance = new Vector3 (10, 1, 1);
+	public static Vector3 irradiance = new Vector3 (1, 1, 1);
 	private static Color Multiply(Color c, Vector3 irr)
 	{
 		return new Color (c.a * irr.x, c.g * irr.y, c.b * irr.z);
@@ -206,6 +206,8 @@ public class RayTracing {
 			Vector3 inray = Vector3.zero;
 			if (RayTracing.lightType == "dir")
 				inray = -RayTracing.lightDir;
+			else if (RayTracing.lightType == "point")
+				inray = (RayTracing.lightPos - result.pos).normalized;
 
 			float diffuse = Mathf.Max(0,  Vector3.Dot (result.normal, inray));			
 			var final = (diffuse * Multiply(result.renderable.material.color, irradiance));			
@@ -221,8 +223,10 @@ public class RayTracing {
 		{			
 			Vector3 inray = Vector3.zero;
 			if (RayTracing.lightType == "dir")
-				inray = -RayTracing.lightDir; //(RayTracing.lightPos - result.pos).normalized;							
-
+				inray = -RayTracing.lightDir; 
+			else if (RayTracing.lightType == "point")
+				inray = (RayTracing.lightPos - result.pos).normalized;
+			
 			float diffuse = Mathf.Max(0,  Vector3.Dot (result.normal, inray));
 			Vector3 L = (camera.pos - result.pos).normalized;
 			float specular = Mathf.Pow (Mathf.Max (0, Vector3.Dot (-Vector3.Reflect (inray, result.normal), L)), 10f) * 1.0f;			
@@ -244,11 +248,16 @@ public class RayTracing {
 			{
 				if (RayTracing.lightType == "dir") {
 					Vector3 shadowRay = -RayTracing.lightDir; //(RayTracing.lightPos - result.pos);
-					var shadowResult = RayTracing.Intersect (new Ray (result.pos, shadowRay.normalized));
-					// todo: && shadowResult.distance < shadowRay.magnitude
+					var shadowResult = RayTracing.Intersect (new Ray (result.pos, shadowRay.normalized));					
 					if (shadowResult != null)
 						return RayTracing.black;
-				}				
+				} else if (RayTracing.lightType == "point") {
+					Vector3 shadowRay = RayTracing.lightPos - result.pos;
+					var shadowResult = RayTracing.Intersect (new Ray (result.pos, shadowRay.normalized));					
+					if (shadowResult != null && shadowResult.distance < shadowRay.magnitude)
+						return RayTracing.black;
+				}
+					
 			}
 
 			Color final = GetColorByType (result, camera)*(1-result.renderable.material.albedo);			
