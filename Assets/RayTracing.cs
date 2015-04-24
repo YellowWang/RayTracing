@@ -36,10 +36,24 @@ public class RayTracing {
 	}
 
 	#region lighting	
-	public static string  lightType = "point"; // “dir":directional light, "point":point light
-	public static Vector3 lightPos  = new Vector3 (10, 20, 0);
-	public static Vector3 lightDir  = new Vector3 (-1.75f, -2f, 1.5f).normalized;	
-	public static Vector3 irradiance = new Vector3 (1, 1, 1);
+	public class Light 
+	{
+		public enum Type
+		{
+			dir,
+			point,
+			spot
+		}
+		public Type  type;// "dir", "point", "spot"
+		public Vector3 pos; // position
+		public Vector3 dir; // direction
+		public Vector3 irradiance; // irradiance
+		public Light(Type type)
+		{
+			this.type = type;
+		}
+	}
+	public static List<Light> lights = new List<Light>();
 	private static Color Multiply(Color c, Vector3 irr)
 	{
 		return new Color (c.a * irr.x, c.g * irr.y, c.b * irr.z);
@@ -190,27 +204,44 @@ public class RayTracing {
 			return GetColorByReflectance (result, camera, RayTracing.recursive_num);
 		}
 
-		static public Color GetColorByType(InterResult result, Camera camera)
+		static public Color GetColorByType(InterResult result, Camera camera, Light light = null)
 		{
+			// shadow ray
+			// todo:
+			if (true && light!=null)//shadow
+			{
+				if (light.type == Light.Type.dir) {
+					Vector3 shadowRay = -light.dir; 
+					var shadowResult = RayTracing.Intersect (new Ray (result.pos, shadowRay.normalized));					
+					if (shadowResult != null)
+						return RayTracing.black;
+				} else if (light.type == Light.Type.point) {
+					Vector3 shadowRay = light.pos - result.pos;
+					var shadowResult = RayTracing.Intersect (new Ray (result.pos, shadowRay.normalized));					
+					if (shadowResult != null && shadowResult.distance < shadowRay.magnitude)
+						return RayTracing.black;
+				}
+			}
+
 			if (result.renderable.material.type == Type.checkboard)
 				return GetColorByCheckboard (result, camera);
 			else if (result.renderable.material.type == Type.phong)
-				return GetColorByPhong (result, camera);
+				return GetColorByPhong (result, camera, light);
 			else if (result.renderable.material.type == Type.lambert)
-				return GetColorByLambert (result, camera);
+				return GetColorByLambert (result, camera, light);
 			return black;
 		}
 
-		static private Color GetColorByLambert (InterResult result, Camera camera)
+		static private Color GetColorByLambert (InterResult result, Camera camera, Light light)
 		{
 			Vector3 inray = Vector3.zero;
-			if (RayTracing.lightType == "dir")
-				inray = -RayTracing.lightDir;
-			else if (RayTracing.lightType == "point")
-				inray = (RayTracing.lightPos - result.pos).normalized;
+			if (light.type == Light.Type.dir)
+				inray = -light.dir;
+			else if (light.type == Light.Type.point)
+				inray = (light.pos - result.pos).normalized;
 
 			float diffuse = Mathf.Max(0,  Vector3.Dot (result.normal, inray));			
-			var final = (diffuse * Multiply(result.renderable.material.color, irradiance));			
+			var final = (diffuse * Multiply(result.renderable.material.color, light.irradiance));			
 			return final;
 		}
 
@@ -219,18 +250,18 @@ public class RayTracing {
 			return ((Mathf.Floor(result.pos.x) + Mathf.Floor(result.pos.z)) % 2) < 1 ? RayTracing.white : RayTracing.black;
 		}
 
-		static private Color GetColorByPhong (InterResult result, Camera camera)
+		static private Color GetColorByPhong (InterResult result, Camera camera, Light light)
 		{			
 			Vector3 inray = Vector3.zero;
-			if (RayTracing.lightType == "dir")
-				inray = -RayTracing.lightDir; 
-			else if (RayTracing.lightType == "point")
-				inray = (RayTracing.lightPos - result.pos).normalized;
+			if (light.type == Light.Type.dir)
+				inray = -light.dir; 
+			else if (light.type == Light.Type.point)
+				inray = (light.pos - result.pos).normalized;
 			
 			float diffuse = Mathf.Max(0,  Vector3.Dot (result.normal, inray));
 			Vector3 L = (camera.pos - result.pos).normalized;
 			float specular = Mathf.Pow (Mathf.Max (0, Vector3.Dot (-Vector3.Reflect (inray, result.normal), L)), 10f) * 1.0f;			
-			var final = (diffuse * Multiply(result.renderable.material.color, irradiance)) + specular*RayTracing.white;			
+			var final = (diffuse * Multiply(result.renderable.material.color, light.irradiance)) + specular*RayTracing.white;			
 			return final;
 		}
 
@@ -242,28 +273,17 @@ public class RayTracing {
 			if (depth == 0 || result.renderable.material.albedo - 0f < 0.000001f)
 				return final;*/
 
-			// shadow ray
-			// todo:
-			if (true)//shadow
-			{
-				if (RayTracing.lightType == "dir") {
-					Vector3 shadowRay = -RayTracing.lightDir; //(RayTracing.lightPos - result.pos);
-					var shadowResult = RayTracing.Intersect (new Ray (result.pos, shadowRay.normalized));					
-					if (shadowResult != null)
-						return RayTracing.black;
-				} else if (RayTracing.lightType == "point") {
-					Vector3 shadowRay = RayTracing.lightPos - result.pos;
-					var shadowResult = RayTracing.Intersect (new Ray (result.pos, shadowRay.normalized));					
-					if (shadowResult != null && shadowResult.distance < shadowRay.magnitude)
-						return RayTracing.black;
-				}
-					
+			// todo:emissvie?
+			Color final = RayTracing.black;	
+			foreach (var l in lights) {
+				final += GetColorByType (result, camera, l)*(1-result.renderable.material.albedo);
 			}
 
-			Color final = GetColorByType (result, camera)*(1-result.renderable.material.albedo);			
 			if (depth == 0 || result.renderable.material.albedo - 0f < 0.000001f)
 				return final;
-			
+
+			//todo: if black, then should not reflect?
+
 			// reflect			
 			Ray newRay = new Ray(result.pos, Vector3.Reflect(result.inRay, result.normal));		
 			//Debug.Log ("newRay:" + newRay.pos + "/" + newRay.dir);
@@ -409,12 +429,6 @@ public class RayTracing {
 			}
 		}
 
-		/*tex.SetPixel (0, 0, RayTracing.green);
-		tex.SetPixel (0, 1, RayTracing.green);
-		tex.SetPixel (0, 2, RayTracing.green);
-		tex.SetPixel (0, 3, RayTracing.green);
-		tex.SetPixel (0, 4, RayTracing.green);*/
-
 		File.WriteAllBytes(Application.persistentDataPath + "/113.png", tex.EncodeToPNG ());
 	}
 
@@ -452,13 +466,19 @@ public class RayTracing {
 
 		Material m1 = new Material (Material.Type.phong, 0.3f, RayTracing.red);		
 		Sphere sphere1 = new Sphere (new Vector3(2f,1f,10), 2f, m1);
-		Material m2 = new Material (Material.Type.phong, 0.3f, RayTracing.green);
+		Material m2 = new Material (Material.Type.phong, 0.3f, RayTracing.blue);
 		Sphere sphere2 = new Sphere (new Vector3(-2f,1f,10), 2f, m2);
 		Material m3 = new Material (Material.Type.checkboard, 0.5f, new Color(0.0f, 0.5f, 0.5f));
 		Plane plane1 = new Plane (new Vector3 (0f, 1f, 0f), -1.0f, m3);
 		renderlist.Add (sphere1);
 		renderlist.Add (sphere2);
 		renderlist.Add (plane1);
+
+		lights.Clear();
+		var l1 = new Light (Light.Type.point);
+		l1.pos = new Vector3 (10, 10, 0);		
+		l1.irradiance = new Vector3 (1,1,1);
+		lights.Add (l1);
 
 		var camera = new Camera ();
 		
@@ -498,16 +518,36 @@ public class RayTracing {
 		Texture2D tex = new Texture2D (RayTracing.width, RayTracing.height);
 		var color = new Color (0.0f, 0.0f, 0.0f, 1.0f);
 
-		Material m1 = new Material (Material.Type.lambert, 0.0f, RayTracing.white);		
-		Sphere sphere1 = new Sphere (new Vector3(0f,0f,10), 2f, m1);
-		Material m2 = new Material (Material.Type.lambert, 0.0f, new Color(1.0f, 1.0f, 1.0f));
+		Material m1 = new Material (Material.Type.lambert, 0.0f, RayTracing.green);		
+		Sphere sphere1 = new Sphere (new Vector3(1f,1f,8f), 2f, m1);
+		Material m2 = new Material (Material.Type.checkboard, 0.0f, new Color(1.0f, 1.0f, 1.0f));
 		Plane plane1 = new Plane (new Vector3 (0f, 1f, 0f), -2.0f, m2);		
-		Plane plane2 = new Plane (new Vector3 (1f, 0f, 0f), -2.0f, m2);		
-		Plane plane3 = new Plane (new Vector3 (0f, 0f, -1f), -13.0f, m2);
+		Material m3 = new Material (Material.Type.lambert, 0.0f, new Color(1.0f, 1.0f, 1.0f));
+		Plane plane2 = new Plane (new Vector3 (1f, 0f, 0f), -2.0f, m3);		
+		Plane plane3 = new Plane (new Vector3 (0f, 0f, -1f), -13.0f, m3);
+		renderlist.Clear ();
 		renderlist.Add (sphere1);
 		renderlist.Add (plane1);
 		renderlist.Add (plane2);
-		renderlist.Add(plane3);
+		renderlist.Add (plane3);
+
+		// light
+		lights.Clear();
+		/*for (int i = 0; i < 5; i++)
+			for (int k = 0; k < 5; k++) {
+				var l1 = new Light (Light.Type.point);
+				l1.pos = new Vector3 (1+i, 10-k, 8);
+				l1.irradiance = new Vector3 (1,1,1);
+				lights.Add (l1);
+			}*/
+		var l1 = new Light (Light.Type.dir);
+		l1.dir = new Vector3 (-1.75f, -2f, 1.5f).normalized;	
+		l1.irradiance = new Vector3 (1,1,1);
+		lights.Add (l1);
+		var l2 = new Light (Light.Type.point);
+		l2.pos = new Vector3 (5, 5, 5);
+		l2.irradiance = new Vector3 (1,1,1);
+		//lights.Add (l2);
 
 		var camera = new Camera ();
 
@@ -523,8 +563,7 @@ public class RayTracing {
 					if (result != null) {
 						if (nearest == null) {
 							nearest = result;
-							min_distance = result.distance;
-							//Debug.Log (k + "," + i);
+							min_distance = result.distance;							
 						} else if (result.distance < min_distance) {
 							nearest = result;
 							min_distance = result.distance;
