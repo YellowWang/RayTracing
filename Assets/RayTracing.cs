@@ -48,6 +48,7 @@ public class RayTracing {
 		public Vector3 pos; // position
 		public Vector3 dir; // direction
 		public Vector3 irradiance; // irradiance
+		public Vector3 spot; // spot parameters: 0:theta  1:phi 2:falloff
 		public Light(Type type)
 		{
 			this.type = type;
@@ -215,12 +216,12 @@ public class RayTracing {
 					var shadowResult = RayTracing.Intersect (new Ray (result.pos, shadowRay.normalized));					
 					if (shadowResult != null)
 						return RayTracing.black;
-				} else if (light.type == Light.Type.point) {
+				} else if (light.type == Light.Type.point || light.type == Light.Type.spot) {
 					Vector3 shadowRay = light.pos - result.pos;
 					var shadowResult = RayTracing.Intersect (new Ray (result.pos, shadowRay.normalized));					
 					if (shadowResult != null && shadowResult.distance < shadowRay.magnitude)
 						return RayTracing.black;
-				}
+				}				
 			}
 
 			if (result.renderable.material.type == Type.checkboard)
@@ -241,6 +242,20 @@ public class RayTracing {
 			else if (light.type == Light.Type.point) {
 				inray = (light.pos - result.pos);
 				attenuation = 1f / inray.sqrMagnitude;					
+			} else if (light.type == Light.Type.spot) {
+				inray = (light.pos - result.pos);
+				attenuation = 1f / inray.sqrMagnitude;				
+				inray.Normalize ();
+				var alp = Vector3.Dot(inray, -light.dir);			
+				//todo: should pre calculate the and phi
+				var the = Mathf.Cos (Camera.AngleToRadians (light.spot.x / 2));
+				var phi = Mathf.Cos (Camera.AngleToRadians (light.spot.y / 2));
+				if (alp >= the)
+					attenuation *= 1f;				
+				else if (alp < the && alp > phi) 
+					attenuation *= Mathf.Pow((alp - phi)/(the - phi), light.spot.z);				
+				else
+					attenuation *= 0f;
 			}
 			inray.Normalize ();
 			float diffuse = Mathf.Max(0,  Vector3.Dot (result.normal, inray));			
@@ -262,6 +277,20 @@ public class RayTracing {
 			else if (light.type == Light.Type.point) {				
 				inray = (light.pos - result.pos);
 				attenuation = 1f / inray.sqrMagnitude;						
+			}
+			else if (light.type == Light.Type.spot) {
+				inray = (light.pos - result.pos);
+				attenuation = 1f / inray.sqrMagnitude;				
+				inray.Normalize ();
+				var alp = Vector3.Dot(inray, -light.dir);				
+				var the = Mathf.Cos (Camera.AngleToRadians (light.spot.x / 2));
+				var phi = Mathf.Cos (Camera.AngleToRadians (light.spot.y / 2));
+				if (alp >= the)
+					attenuation *= 1f;				
+				else if (alp < the && alp > phi) 
+					attenuation *= Mathf.Pow((alp - phi)/(the - phi), light.spot.z);				
+				else
+					attenuation *= 0f;
 			}
 			inray.Normalize ();
 
@@ -338,7 +367,7 @@ public class RayTracing {
 		float   width;
 		float   height;
 
-		float AngleToRadians(float angle)
+		public static float AngleToRadians(float angle)
 		{
 			return angle * Mathf.PI / 180f;
 		}
@@ -520,6 +549,62 @@ public class RayTracing {
 		//Debug.Log ("path:" + Application.persistentDataPath);
 	}
 
+	private void TestSpot()
+	{
+		Texture2D tex = new Texture2D (RayTracing.width, RayTracing.height);
+		var color = new Color (0.0f, 0.0f, 0.0f, 1.0f);
+
+		Material m1 = new Material (Material.Type.lambert, 0.0f, RayTracing.white);		
+		Sphere sphere1 = new Sphere (new Vector3(-1f,-1f,8f), 2f, m1);
+		Material m2 = new Material (Material.Type.lambert, 0.0f, new Color(1.0f, 1.0f, 1.0f));
+		Plane plane1 = new Plane (new Vector3 (0f, 1f, 0f), -3.0f, m2);								
+		renderlist.Clear ();
+		renderlist.Add (sphere1);
+		renderlist.Add (plane1);		
+
+		// light
+		var l1 = new Light (Light.Type.dir);
+		l1.dir = new Vector3 (-1.75f, -2f, 1.5f).normalized;	
+		l1.irradiance = new Vector3 (1,1,1)*0.7f;
+		//lights.Add (l1);
+		var l2 = new Light (Light.Type.spot);
+		l2.pos = new Vector3 (10, 10, 8f);
+		l2.dir = new Vector3 (-1, -1, 0).normalized;
+		l2.spot = new Vector3 (20, 30, 0.5f);
+		l2.irradiance = new Vector3 (1,1,1)*120f;
+		lights.Add (l2);
+
+		var camera = new Camera ();
+
+		int count = 0;
+		for (int i = RayTracing.height; i >= 0 ; i--) {
+			for (int k = 0; k < RayTracing.width; k++) {
+				var ray = camera.ScreenToRay (k, i);	
+				color.r = color.g = color.b = 0.0f;		
+				InterResult nearest=null;
+				float min_distance=0f;
+				foreach (var renderable in renderlist) {
+					var result = renderable.Intersect (ray);
+					if (result != null) {
+						if (nearest == null) {
+							nearest = result;
+							min_distance = result.distance;							
+						} else if (result.distance < min_distance) {
+							nearest = result;
+							min_distance = result.distance;
+						}																	
+					} 
+				}								
+
+				if (nearest != null)
+					color = Material.GetColor (nearest, camera);	
+				color.a = 1f;
+				tex.SetPixel (k, RayTracing.height-i, color);
+			}
+		}
+		File.WriteAllBytes(Application.persistentDataPath + "/117.png", tex.EncodeToPNG ());
+	}
+
 	private void TestLight()
 	{
 		Texture2D tex = new Texture2D (RayTracing.width, RayTracing.height);
@@ -596,7 +681,8 @@ public class RayTracing {
 		//TestPhong();
 
 		//TestReflect();
-		TestLight();
+		TestSpot();
+		//TestLight();
 
 	}
 
