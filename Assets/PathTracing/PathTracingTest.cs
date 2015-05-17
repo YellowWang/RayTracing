@@ -9,22 +9,9 @@ public class PathTracingTest : MonoBehaviour {
 		//TestSavePic ();
 		//TestIntersect ();
 		//TestCamera ();
-
-		/*Vec dir = new Vec(-0.0536, -0.1600, -0.9857);
-		Vec n = new Vec(0.6160, -0.1701, 0.7692);
-		// 0.8875, -0.4199, 0.1896
-		Vec rrr = dir-n*2*n.dot(dir);
-
-		Vector3 dir1 = new Vector3(-0.0536f, -0.16f, -0.9857f);
-		Vector3 n1 = new Vector3(0.616f, -0.1701f, 0.7692f);
-		Vector3 r1 = Vector3.Reflect(dir1, n1);
-
-		int a = 0;*/
-
 		//TestMain1();
-		TestMain2();
 		//TestMain3Ref();
-
+		TestMain2();
 	}
 
 	void Update()
@@ -52,7 +39,7 @@ public class PathTracingTest : MonoBehaviour {
 		int w = 100;
 		int h = 100;
 		PT.Camera camera = new PT.Camera (new Vec (0, 0, 0), new Vec (0, 0, -1).norm(), 45, w * 1f / h);
-		PathTracing.Main(w,h, 1, "pt3.png", list, camera);
+		PathTracing.Main(w,h, 1, 2, "pt3.png", list, camera);
 	}
 
 	void TestMain2()
@@ -71,7 +58,7 @@ public class PathTracingTest : MonoBehaviour {
 		int w = 100;
 		int h = 100;
 		PT.Camera camera = new PT.Camera (new Vec (50, 52, 295.6), new Vec (0, -0.042612, -1).norm(), 45, w * 1f / h);				
-		PathTracing.Main(w,h, 10, "pt2_temp.png", list, camera);		
+		PathTracing.Main(w,h, 50, 2, "pt3.png", list, camera);		
 	}
 
 	void TestSavePic() 

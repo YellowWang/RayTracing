@@ -1,10 +1,14 @@
-﻿using UnityEngine;
+﻿#define THREAD
+
+using UnityEngine;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 
+
 namespace PT {
+	
 
 	public struct Vec {
 		public double x,y,z;                 // position,also color (r,g,b)
@@ -52,13 +56,6 @@ namespace PT {
 			this.dir = dir;
 			cx=new Vec(ratio*0.5135);
 			cy=(cx%dir).norm()*0.5135;
-			/*cy = new Vec(0,1,0);
-			cx = (cy % dir).norm ();
-			cy = (dir % cx).norm ();
-			double height = Math.Tan (AngleToRadians (fov/2))*near*2;
-			UnityEngine.Debug.Log ("cx:" + Debug.ToString (cx) + "/cy:"+Debug.ToString(cy)+"/height:"+height);
-			cy = cy * height;
-			cx = cx * height * ratio;*/
 		}
 	}
 
@@ -94,7 +91,12 @@ namespace PT {
 		public static List<Renderable> renderList = new List<Renderable>();
 
 		// rand double from 0.0 to 1.0
-		private static System.Random[] rand = new System.Random[4];
+		#if THREAD
+		private static System.Random[] rand = new System.Random[THREAD_NUM];
+		#else
+		private static System.Random[] rand = new System.Random[1];
+		#endif
+
 		public static double erand48(int index)
 		{
 			if (rand[index] == null)
@@ -109,7 +111,7 @@ namespace PT {
 
 		// fixed value = 2.2
 		public static float Gamma(double x)
-		{		
+		{					
 			return (float)Math.Pow (clamp (x), 1 / 2.2);			
 		}
 
@@ -161,7 +163,7 @@ namespace PT {
 		public class Sphere : Renderable
 		{
 			public Vec  pos;
-			public double	radius;						
+			public double	radius;
 			public Sphere(Vec p, double r, Vec c, Vec e, Relf refl)
 			{
 				pos = p;
@@ -189,23 +191,6 @@ namespace PT {
 				result.normal = (result.pos - this.pos).norm();					
 				result.renderable = this;					 
 				return result;
-
-				/*Vec v = ray.pos-this.pos;		
-				double ddotv = ray.dir.dot(v);
-				if (ddotv <= 0) {
-					double param1 = ddotv * ddotv;
-					double param2 = v.magnitude * v.magnitude - this.radius * this.radius;				
-					if (param1 - param2 >= 0) {					
-						InterResult result = new InterResult ();
-						result.distance = -ddotv - Math.Sqrt (param1 - param2);
-						result.pos = ray.GetPoint (result.distance);
-						result.normal = (result.pos - this.pos).norm();					
-						result.renderable = this;					 
-						return result;
-					}
-				}
-
-				return null;*/
 			}
 		}
 
@@ -223,7 +208,7 @@ namespace PT {
 			return nearest;
 		}
 
-		public static Vec Radiance(Ray r, int depth, int thread, int E = 1)
+		public static Vec Radiance(Ray r, int depth, int thread)
 		{
 			// distance to intersection
 			double t;
@@ -234,8 +219,8 @@ namespace PT {
 				return new Vec();							
 			var obj = res.renderable;
 			
-			// todo:
-			if (depth > 2)
+			// GI can be more realistic when depth is deeper, but slower. 10 maybe a trusty number
+			if (depth > _maxDepth)
 				return obj.e;
 			
 			// ray intersect point
@@ -247,14 +232,13 @@ namespace PT {
 			// object color (BRDF modulator)
 			Vec f = obj.c;
 
-
 			// Use maximum reflectivity amount for Russian Roulette			
 			double p = f.x>f.y && f.x>f.z ? f.x : f.y>f.z?f.y:f.z; // max refl
 			if (++depth>5) {
 				if (erand48(thread)<p)
-					f = f*(1/p); // todo: why?
+					f = f*(1/p);
 				else
-					return obj.e; //todo:E?
+					return obj.e;
 			}
 
 			// ideal diffuse reflection
@@ -263,7 +247,7 @@ namespace PT {
 				double r1 = 2*Math.PI*erand48(thread);
 				double r2 = erand48(thread);
 				double r2s = Math.Sqrt(r2);
-				// todo: how to determine the coordinates
+				// construct local coordinates
 				Vec w = n1;
 				Vec u = ((Math.Abs(w.x)>0.1?new Vec(0,1):new Vec(1))%w).norm();
 				Vec v = w%u;
@@ -289,11 +273,12 @@ namespace PT {
 			double ddn=r.dir.dot(n1);
 			double cos2t;
 			// if total internal reflection, reflect
-			// todo: why?
+			// see: http://graphics.stanford.edu/courses/cs148-10-summer/docs/2006--degreve--reflection_refraction.pdf
 			if ((cos2t=1-nnt*nnt*(1-ddn*ddn))<0)
 				return obj.e + f.mult(Radiance(reflRay,depth,thread));
 			// otherwise, choose reflection or refraction
 			Vec tdir = (r.dir*nnt - n*((into?1:-1)*(ddn*nnt+Math.Sqrt(cos2t)))).norm();
+			// Schlick's approximation for Fresnel's equation
 			double a=nt-nc;
 			double b=nt+nc;
 			double R0=a*a/(b*b);
@@ -303,36 +288,37 @@ namespace PT {
 			double P=0.25+0.5*Re;
 			double RP=Re/P;
 			double TP=Tr/(1-p);
-			return obj.e + f.mult(depth>2?(erand48(thread)<P?Radiance(reflRay,depth,thread)*RP:Radiance(new Ray(x,tdir),depth,thread)*TP):
-			                      Radiance(reflRay,depth,thread)*Re+Radiance(new Ray(x,tdir),depth,thread)*Tr);
-			                            
+			return obj.e + f.mult(depth>2?(erand48(thread)<P?Radiance(reflRay,depth,thread)*RP:Radiance(new Ray(x,tdir),depth,thread)/**Tp*/):
+				Radiance(reflRay,depth,thread)*Re+Radiance(new Ray(x,tdir),depth,thread)*Tr);			
 		}
 
 		public static void Update()
 		{
-			if (start) {
-				/*if (steps / (_width * _height / 100) != rate) {
+			if (start) {				
+				// one frame do all
+				/*for (; steps < _width * _height; steps++) {
+					int x = steps % _width;
+					int y = steps / _width;
+					Pixel (x, y, 0);
+				}
+				if (true)*/
+				#if THREAD
+				int completed = 0;
+				foreach (var b in _threadComplete) {
+					completed += b ? 1 : 0;
+				}
+				if (completed == THREAD_NUM)
+				#else
+				if (steps / (_width * _height / 100) != rate) {
 					rate = steps / (_width * _height / 100);
 					UnityEngine.Debug.Log ("steps:"+rate+"%");
 				}
-
 				int x = steps % _width;
 				int y = steps / _width;
-				Pixel (x, y);
-				steps++;*/
-
-				//if (steps >= _width * _height) {					
-				//_semaphone.WaitOne();
-				//_semaphone.WaitOne();
-				/*_semaphone.WaitOne();
-				_semaphone.WaitOne();*/
-
-				int completed = 0;
-				foreach (var b in _threadCompelte) {
-					completed += b ? 1 : 0;
-				}
-
-				if (completed == 4)
+				Pixel (x, y,0);
+				steps++;
+				if (steps >= _width * _height)
+				#endif
 				{
 					Debug.EndTime ();
 					start = false;					
@@ -348,9 +334,6 @@ namespace PT {
 				}
 			}
 		}
-		public static int steps = 0;
-		public static bool start = false;					
-		public static int rate = -1;
 
 		public static void Pixel(int x, int y, int thread)
 		{
@@ -376,26 +359,32 @@ namespace PT {
 						Vec d = camera.cx * (((sx + 0.5 + dx) / 2 + x) / width - 0.5) +
 							camera.cy * (((sy + 0.5 + dy) / 2 + y) / height - 0.5) +
 							camera.dir;
-						r = r + Radiance(new Ray(camera.postion+d*140, d.norm()), 0, thread)*(1f/samples);
-						//UnityEngine.Debug.Log("ray /pos:"+camera.postion.ToString()+"/dir:"+d.ToString());
+						r = r + Radiance(new Ray(camera.postion+d*140, d.norm()), 0, thread)*(1f/samples);						
 					}
 					_c [i] = _c [i] + (new Vec (clamp (r.x), clamp (r.y), clamp (r.z))) * 0.25;
 				}			
 			}
 		}
-
+					
 		static Vec []_c;
 		public static int _width;
-		static int _height;
+		public static int _height;
 		static int _samples;
+		static int _maxDepth;
 		static Camera _camera;
-		static string _fileName;
-		public static int _block;
-		public static int _maxCount;
-		public static Semaphore _semaphone = new Semaphore (0, 4);
-		public static bool[] _threadCompelte = new bool[4];
+		static string _fileName;		
+		static bool start = false;
+		static int steps = 0;							
+		static int rate = -1;
 
-		public static void Main(int width, int height, int samples, string name, List<Renderable> list, Camera camera)
+		#if THREAD
+		public static int _block;
+		public static int _maxCount;		
+		public const int THREAD_NUM = 1;
+		public static bool[] _threadComplete = new bool[THREAD_NUM];
+		#endif
+
+		public static void Main(int width, int height, int samples, int maxDepth, string name, List<Renderable> list, Camera camera)
 		{						
 			Debug.StartTime ();
 			renderList.Clear();
@@ -406,23 +395,27 @@ namespace PT {
 			_width = width;
 			_height = height;
 			_samples = samples;
+			_maxDepth = maxDepth;
 			_camera = camera;
 			start = true;
 			steps = 0;
-
+							
+			#if THREAD
 			// threading
-			_block = width*height/4;
+			_block = width*height/THREAD_NUM;
 			_maxCount = width * height;
-			for (int i = 0; i < 4; i++) {
+			for (int i = 0; i < THREAD_NUM; i++) {
 				var worker = new Worker (i);
 				Thread t= new Thread(new ParameterizedThreadStart(worker.Do));
 				t.Start();
-			}							
+			}		
+			#endif
 		}
 
 
 	}
 
+	#if THREAD
 	class Worker
 	{
 		int index;
@@ -435,12 +428,12 @@ namespace PT {
 		{						
 			UnityEngine.Debug.Log ("thread " + index + " start " + (index*PathTracing._block) + "/" + PathTracing._block);
 
-			if (index == 3) {
-				int steps = PathTracing._block / 10;
+			if (index == PathTracing.THREAD_NUM-1) {
+				int steps = PathTracing._block / 100;
 				for (int i = index*PathTracing._block; i < PathTracing._maxCount; i++) {
 					if (steps-- <= 0)					
 					{
-						steps = PathTracing._block / 10;						
+						steps = PathTracing._block / 100;						
 						UnityEngine.Debug.Log("Thread " + index + ": " + (i-index*PathTracing._block)*100/PathTracing._block + "%");
 					}
 					int x = i % PathTracing._width;
@@ -449,11 +442,11 @@ namespace PT {
 				}
 			}
 			else {
-				int steps = PathTracing._block / 10;
+				int steps = PathTracing._block / 100;
 				for (int i = index*PathTracing._block; i < index*PathTracing._block+PathTracing._block; i++) {						
 					if (steps-- <= 0)					
 					{
-						steps = PathTracing._block / 10;						
+						steps = PathTracing._block / 100;						
 						UnityEngine.Debug.Log("Thread " + index + ": " + (i-index*PathTracing._block)*100/PathTracing._block + "%");
 					}
 
@@ -463,11 +456,11 @@ namespace PT {
 				}
 			}
 
-			PathTracing._threadCompelte [index] = true;
-			UnityEngine.Debug.Log ("thread " + index + " complete");
-			PathTracing._semaphone.Release ();
+			PathTracing._threadComplete [index] = true;
+			UnityEngine.Debug.Log ("thread " + index + " complete");			
 		}
 	}		
+	#endif
 
 	public static class Debug {
 		public static string ToString(Vec v)
