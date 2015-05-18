@@ -7,7 +7,7 @@ public class RayTracing {
 
 	public static int width = 512;
 	public static int height = 512;
-	public const  int recursive_num = 1;
+	public const  int recursive_num = 5;
 
 	public static List<Renderable> renderlist = new List<Renderable>();
 
@@ -57,7 +57,7 @@ public class RayTracing {
 	public static List<Light> lights = new List<Light>();
 	private static Color Multiply(Color c, Vector3 irr)
 	{
-		return new Color (c.a * irr.x, c.g * irr.y, c.b * irr.z);
+		return new Color (c.r * irr.x, c.g * irr.y, c.b * irr.z, c.a);
 	}
 	#endregion
 
@@ -303,12 +303,6 @@ public class RayTracing {
 
 		static private Color GetColorByReflectance(InterResult result, Camera camera, int depth)
 		{						
-			/*Vector3 inray = (RayTracing.lightPos - result.pos).normalized;
-			float diffuse = Mathf.Max(0,  Vector3.Dot (result.normal, inray)) * (1-result.renderable.material.albedo);
-			var final = diffuse * result.renderable.material.color;											
-			if (depth == 0 || result.renderable.material.albedo - 0f < 0.000001f)
-				return final;*/
-
 			// todo:emissvie?
 			Color final = RayTracing.black;	
 			foreach (var l in lights) {
@@ -513,7 +507,7 @@ public class RayTracing {
 		lights.Clear();
 		var l1 = new Light (Light.Type.point);
 		l1.pos = new Vector3 (10, 10, 0);		
-		l1.irradiance = new Vector3 (1,1,1);
+		l1.irradiance = new Vector3 (1,1,1)*500f;
 		lights.Add (l1);
 
 		var camera = new Camera ();
@@ -680,9 +674,9 @@ public class RayTracing {
 		//TestNormal();
 		//TestPhong();
 
-		//TestReflect();
+		TestReflect();
 		TestSpot();
-		//TestLight();
+		TestLight();
 
 	}
 
